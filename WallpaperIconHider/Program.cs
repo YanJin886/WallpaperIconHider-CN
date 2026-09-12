@@ -1,10 +1,10 @@
 ﻿using System;
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Windows.Forms;
@@ -46,6 +46,12 @@ class Program
 
     [DllImport("user32.dll", SetLastError = true)]
     static extern bool GetCursorPos(out POINT lpPoint);
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
+
+    private const int VK_LBUTTON = 0x01;
+    private const int VK_RBUTTON = 0x02;
 
     [DllImport("user32.dll")]
     static extern IntPtr GetForegroundWindow();
@@ -285,13 +291,18 @@ class Program
     }
 
     // --------------------------------------------------------------------
-    // ÉLÉMENTS DU MENU
+    // MENU CONTEXTUEL PERSONNALISÉ
     // --------------------------------------------------------------------
 
-    private static ToolStripMenuItem? enableItem;
-    private static ToolStripMenuItem? disableItem;
-    private static ToolStripMenuItem? delayItem;
-    private static ToolStripMenuItem? startupItem;
+    // Un seul popup peut être ouvert à la fois.
+    private static ModernMenuForm? activeMenuForm;
+
+    // Point d'ancrage mémorisé lorsque le menu est ouvert depuis l'icône
+    // de la zone de notification. Les sous-menus réutilisent exactement
+    // cette ancre au lieu de suivre la position de la souris.
+    private static Point menuAnchorPoint;
+    private static Rectangle menuWorkingArea;
+    private static bool menuAnchorInitialized = false;
 
     // --------------------------------------------------------------------
     // CONFIGURATION LOCALE
@@ -555,11 +566,8 @@ class Program
 
     private static void UpdateStartupMenu()
     {
-        if (startupItem == null)
-            return;
-
-        startupItem.Checked =
-            startWithWindows;
+        // Le menu personnalisé est reconstruit à chaque ouverture.
+        // Aucun contrôle persistant n'a donc besoin d'être mis à jour ici.
     }
 
     // --------------------------------------------------------------------
@@ -857,7 +865,6 @@ class Program
         ShowIcons();
 
         UpdateTrayIcon();
-        UpdateTrayMenu();
     }
 
     private static void DisableProgram()
@@ -870,17 +877,48 @@ class Program
         ShowIcons();
 
         UpdateTrayIcon();
-        UpdateTrayMenu();
     }
 
     // --------------------------------------------------------------------
     // SURVEILLANCE DE LA SOURIS
     // --------------------------------------------------------------------
 
+    private static void CheckMenuOutsideClick()
+    {
+        if (activeMenuForm == null ||
+            activeMenuForm.IsDisposed ||
+            !activeMenuForm.Visible)
+        {
+            return;
+        }
+
+        bool leftClick =
+            (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+
+        bool rightClick =
+            (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
+
+        if (!leftClick && !rightClick)
+            return;
+
+        Point cursor = Cursor.Position;
+
+        if (!activeMenuForm.Bounds.Contains(cursor))
+        {
+            CloseCustomMenus();
+        }
+    }
+
     private static void CheckMouse()
     {
         try
         {
+            // NotifyIcon + popup personnalisé : Deactivate n'est pas
+            // suffisamment fiable lorsque Windows garde le focus sur la
+            // zone de notification. On ferme donc explicitement le popup
+            // si un clic est détecté en dehors de celui-ci.
+            CheckMenuOutsideClick();
+
             if (!programEnabled)
                 return;
 
@@ -1145,353 +1183,854 @@ class Program
     }
 
     // --------------------------------------------------------------------
-    // MENU SYSTRAY
+    // MENU CONTEXTUEL PERSONNALISÉ
     // --------------------------------------------------------------------
 
-    private static void UpdateTrayMenu()
+    private static void CloseCustomMenus()
     {
-        if (enableItem == null ||
-            disableItem == null ||
-            delayItem == null)
+        if (activeMenuForm != null)
         {
-            return;
+            ModernMenuForm menuToClose = activeMenuForm;
+            activeMenuForm = null;
+            menuToClose.Close();
+            menuToClose.Dispose();
         }
 
-        enableItem.Checked =
-            programEnabled;
+        menuAnchorInitialized = false;
+    }
 
-        disableItem.Checked =
-            !programEnabled;
+    private static void ShowMainMenu()
+    {
+        // Ouverture depuis l'icône de notification :
+        // on mémorise une seule fois l'ancre et le moniteur.
+        Point cursorPosition = Cursor.Position;
+        Screen screen = Screen.FromPoint(cursorPosition);
 
-        delayItem.Text =
-            $"⏱ Délai : " +
-            $"{inactivityDelaySeconds} seconde" +
-            (inactivityDelaySeconds > 1
-                ? "s"
-                : "");
+        menuAnchorPoint = cursorPosition;
+        menuWorkingArea = screen.WorkingArea;
+        menuAnchorInitialized = true;
 
-        UpdateStartupMenu();
+        CloseCustomMenus();
+
+        // CloseCustomMenus() réinitialise l'état d'ancrage ; on le restaure
+        // immédiatement avec les valeurs que nous venons de calculer.
+        menuAnchorPoint = cursorPosition;
+        menuWorkingArea = screen.WorkingArea;
+        menuAnchorInitialized = true;
+
+        activeMenuForm = ModernMenuForm.CreateMainMenu(
+            programEnabled,
+            () =>
+            {
+                EnableProgram();
+                CloseCustomMenus();
+            },
+            () =>
+            {
+                DisableProgram();
+                CloseCustomMenus();
+            },
+            () =>
+            {
+                ShowSettingsMenu();
+            },
+            () =>
+            {
+                Application.Exit();
+            });
+
+        ShowMenuAtTray(activeMenuForm);
+    }
+
+    private static void ShowSettingsMenu()
+    {
+        // Le menu principal disparaît et est remplacé par le sous-menu.
+        // L'ancre d'origine est conservée.
+        CloseCurrentMenuOnly();
+
+        activeMenuForm = ModernMenuForm.CreateSettingsMenu(
+            inactivityDelaySeconds,
+            startWithWindows,
+            () =>
+            {
+                ShowDelayMenu();
+            },
+            () =>
+            {
+                UpdateStartupSetting(!startWithWindows);
+                ShowSettingsMenu();
+            },
+            () =>
+            {
+                ShowMainMenuAtSameAnchor();
+            });
+
+        ShowMenuAtTray(activeMenuForm);
+    }
+
+    private static void ShowDelayMenu()
+    {
+        CloseCurrentMenuOnly();
+
+        activeMenuForm = ModernMenuForm.CreateDelayMenu(
+            inactivityDelaySeconds,
+            value =>
+            {
+                inactivityDelaySeconds = value;
+                SaveSettings();
+                lastMouseMovement = DateTime.Now;
+                ShowIcons();
+                CloseCustomMenus();
+            },
+            () =>
+            {
+                ShowSettingsMenu();
+            });
+
+        ShowMenuAtTray(activeMenuForm);
+    }
+
+    private static void ShowMainMenuAtSameAnchor()
+    {
+        CloseCurrentMenuOnly();
+
+        activeMenuForm = ModernMenuForm.CreateMainMenu(
+            programEnabled,
+            () =>
+            {
+                EnableProgram();
+                CloseCustomMenus();
+            },
+            () =>
+            {
+                DisableProgram();
+                CloseCustomMenus();
+            },
+            () =>
+            {
+                ShowSettingsMenu();
+            },
+            () =>
+            {
+                Application.Exit();
+            });
+
+        ShowMenuAtTray(activeMenuForm);
+    }
+
+    private static void CloseCurrentMenuOnly()
+    {
+        if (activeMenuForm == null)
+            return;
+
+        ModernMenuForm menuToClose = activeMenuForm;
+        activeMenuForm = null;
+        menuToClose.Close();
+        menuToClose.Dispose();
+    }
+
+    private static void ShowMenuAtTray(Form menuForm)
+    {
+        if (!menuAnchorInitialized)
+        {
+            Point cursorPosition = Cursor.Position;
+            menuAnchorPoint = cursorPosition;
+            menuWorkingArea =
+                Screen.FromPoint(cursorPosition).WorkingArea;
+            menuAnchorInitialized = true;
+        }
+
+        // Le popup est ancré au-dessus de la barre des tâches avec
+        // une marge visuelle supplémentaire.
+        // Les sous-menus gardent exactement le même axe horizontal
+        // et la même hauteur d'ancrage.
+        int x =
+            menuAnchorPoint.X -
+            menuForm.Width / 2;
+
+        // WorkingArea exclut la barre des tâches.
+        // On laisse volontairement un espace supplémentaire afin que le
+        // menu ne soit pas visuellement collé à la zone de notification.
+        // Cette marge s'applique à tous les sous-menus puisqu'ils utilisent
+        // exactement la même ancre.
+        const int MenuBottomMargin = 42;
+
+        int y =
+            menuWorkingArea.Bottom -
+            menuForm.Height -
+            MenuBottomMargin;
+
+        x = Math.Clamp(
+            x,
+            menuWorkingArea.Left + 8,
+            menuWorkingArea.Right - menuForm.Width - 8);
+
+        y = Math.Clamp(
+            y,
+            menuWorkingArea.Top + 8,
+            menuWorkingArea.Bottom - menuForm.Height - MenuBottomMargin);
+
+        menuForm.StartPosition =
+            FormStartPosition.Manual;
+
+        menuForm.Location =
+            new Point(x, y);
+
+        menuForm.Show();
+        menuForm.BringToFront();
+        menuForm.Activate();
     }
 
     // --------------------------------------------------------------------
-    // CONTRÔLE DE SÉLECTION DU DÉLAI
+    // FENÊTRE DU MENU MODERNE
     // --------------------------------------------------------------------
 
-    private class DelaySelector : Control
+    private sealed class ModernMenuForm : Form
     {
-        private int selectedValue;
+        private const int MenuWidth = 260;
+        private const int RowHeight = 42;
+        private const int HeaderHeight = 44;
+        private const int HorizontalPadding = 8;
+        private const int CornerRadius = 14;
 
-        [DesignerSerializationVisibility(
-            DesignerSerializationVisibility.Hidden)]
-        public int SelectedValue
+        private static readonly Color MenuBackground =
+            Color.FromArgb(249, 249, 250);
+
+        private static readonly Color MenuBorder =
+            Color.FromArgb(224, 224, 228);
+
+        private static readonly Color HoverBackground =
+            Color.FromArgb(231, 240, 255);
+
+        private static readonly Color AccentBlue =
+            Color.FromArgb(0, 120, 212);
+
+        private static readonly Color PrimaryText =
+            Color.FromArgb(32, 32, 32);
+
+        private static readonly Color SecondaryText =
+            Color.FromArgb(95, 95, 95);
+
+        private ModernMenuForm(int height)
         {
-            get => selectedValue;
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            ShowIcon = false;
 
-            set
-            {
-                int newValue =
-                    Math.Clamp(
-                        value,
-                        MinimumDelaySeconds,
-                        MaximumDelaySeconds);
+            // Passe au-dessus du panneau de débordement des icônes
+            // de la zone de notification et de la barre des tâches.
+            TopMost = true;
 
-                if (selectedValue ==
-                    newValue)
-                {
-                    return;
-                }
+            StartPosition = FormStartPosition.Manual;
+            ClientSize = new Size(MenuWidth, height);
 
-                selectedValue =
-                    newValue;
-
-                Invalidate();
-            }
-        }
-
-        public DelaySelector(
-            int initialValue)
-        {
-            selectedValue =
-                Math.Clamp(
-                    initialValue,
-                    MinimumDelaySeconds,
-                    MaximumDelaySeconds);
+            BackColor = MenuBackground;
+            Font = new Font(
+                "Segoe UI",
+                9.5f,
+                FontStyle.Regular,
+                GraphicsUnit.Point);
 
             DoubleBuffered = true;
 
-            Height = 55;
+            // Ombre native Windows discrète.
+            SetStyle(
+                ControlStyles.UserPaint |
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer,
+                true);
 
-            Cursor =
-                Cursors.Hand;
+            // Un clic hors du popup (bureau, autre application, barre
+            // des tâches, etc.) lui fait perdre le focus et ferme le menu.
+            Deactivate += (_, _) =>
+            {
+                if (!ContainsFocus)
+                {
+                    if (ReferenceEquals(activeMenuForm, this))
+                        activeMenuForm = null;
 
-            TabStop = false;
+                    Close();
+                }
+            };
+
+            FormClosed += (_, _) =>
+            {
+                if (ReferenceEquals(activeMenuForm, this))
+                    activeMenuForm = null;
+            };
         }
 
-        protected override void OnPaint(
-            PaintEventArgs e)
+        protected override CreateParams CreateParams
         {
-            base.OnPaint(e);
-
-            Graphics g =
-                e.Graphics;
-
-            int segmentWidth =
-                Width /
-                MaximumDelaySeconds;
-
-            for (int i = 1;
-                 i <= MaximumDelaySeconds;
-                 i++)
+            get
             {
-                int left =
-                    (i - 1) *
-                    segmentWidth;
-
-                int right =
-                    i ==
-                    MaximumDelaySeconds
-                        ? Width
-                        : i *
-                          segmentWidth;
-
-                Rectangle segment =
-                    new Rectangle(
-                        left + 1,
-                        1,
-                        right - left - 2,
-                        32);
-
-                if (i <= selectedValue)
-                {
-                    using Brush brush =
-                        new SolidBrush(
-                            SystemColors.Highlight);
-
-                    g.FillRectangle(
-                        brush,
-                        segment);
-                }
-                else
-                {
-                    using Brush brush =
-                        new SolidBrush(
-                            SystemColors.ControlLight);
-
-                    g.FillRectangle(
-                        brush,
-                        segment);
-                }
-
-                using Pen pen =
-                    new Pen(
-                        SystemColors.ControlDark);
-
-                g.DrawRectangle(
-                    pen,
-                    segment);
-
-                string text =
-                    i.ToString();
-
-                SizeF textSize =
-                    g.MeasureString(
-                        text,
-                        Font);
-
-                float textX =
-                    segment.Left +
-                    (segment.Width -
-                     textSize.Width) / 2;
-
-                float textY =
-                    segment.Top +
-                    (segment.Height -
-                     textSize.Height) / 2;
-
-                using Brush textBrush =
-                    new SolidBrush(
-                        i <= selectedValue
-                            ? SystemColors.HighlightText
-                            : SystemColors.ControlText);
-
-                g.DrawString(
-                    text,
-                    Font,
-                    textBrush,
-                    textX,
-                    textY);
+                CreateParams cp = base.CreateParams;
+                cp.ClassStyle |= 0x00020000; // CS_DROPSHADOW
+                return cp;
             }
         }
 
-        protected override void OnMouseClick(
-            MouseEventArgs e)
+        protected override void OnShown(EventArgs e)
         {
-            if (e.Button !=
-                MouseButtons.Left)
+            base.OnShown(e);
+            ApplyRoundedRegion();
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            ApplyRoundedRegion();
+        }
+
+        private void ApplyRoundedRegion()
+        {
+            using GraphicsPath path =
+                CreateRoundedPath(
+                    new Rectangle(
+                        0,
+                        0,
+                        Width,
+                        Height),
+                    CornerRadius);
+
+            Region?.Dispose();
+            Region = new Region(path);
+        }
+
+        private static GraphicsPath CreateRoundedPath(
+            Rectangle bounds,
+            int radius)
+        {
+            int diameter = radius * 2;
+
+            GraphicsPath path = new GraphicsPath();
+
+            path.AddArc(
+                bounds.X,
+                bounds.Y,
+                diameter,
+                diameter,
+                180,
+                90);
+
+            path.AddArc(
+                bounds.Right - diameter,
+                bounds.Y,
+                diameter,
+                diameter,
+                270,
+                90);
+
+            path.AddArc(
+                bounds.Right - diameter,
+                bounds.Bottom - diameter,
+                diameter,
+                diameter,
+                0,
+                90);
+
+            path.AddArc(
+                bounds.X,
+                bounds.Bottom - diameter,
+                diameter,
+                diameter,
+                90,
+                90);
+
+            path.CloseFigure();
+
+            return path;
+        }
+
+        protected override void OnPaintBackground(
+            PaintEventArgs e)
+        {
+            e.Graphics.SmoothingMode =
+                System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+
+            using Brush backgroundBrush =
+                new SolidBrush(MenuBackground);
+
+            e.Graphics.FillRectangle(
+                backgroundBrush,
+                ClientRectangle);
+
+            using Pen borderPen =
+                new Pen(MenuBorder, 1f);
+
+            Rectangle border =
+                new Rectangle(
+                    0,
+                    0,
+                    Width - 1,
+                    Height - 1);
+
+            using GraphicsPath path =
+                CreateRoundedPath(
+                    border,
+                    CornerRadius);
+
+            e.Graphics.DrawPath(
+                borderPen,
+                path);
+        }
+
+        private void AddHeader(
+            string title,
+            Action? backAction)
+        {
+            if (backAction == null)
             {
+                Label titleLabel =
+                    new Label
+                    {
+                        Text = title,
+                        AutoSize = false,
+                        Location =
+                            new Point(
+                                18,
+                                0),
+                        Size =
+                            new Size(
+                                MenuWidth - 36,
+                                HeaderHeight),
+                        TextAlign =
+                            ContentAlignment.MiddleLeft,
+                        Font =
+                            new Font(
+                                "Segoe UI Semibold",
+                                10f,
+                                FontStyle.Bold),
+                        ForeColor = PrimaryText
+                    };
+
+                Controls.Add(titleLabel);
                 return;
             }
 
-            int segmentWidth =
-                Math.Max(
-                    1,
-                    Width /
-                    MaximumDelaySeconds);
+            MenuRow backRow =
+                new MenuRow(
+                    "‹",
+                    null,
+                    title,
+                    false,
+                    false,
+                    true,
+                    AccentBlue,
+                    SecondaryText,
+                    () => backAction());
 
-            int selected =
-                (e.X /
-                 segmentWidth) + 1;
+            backRow.Location =
+                new Point(
+                    HorizontalPadding,
+                    2);
 
-            selected =
-                Math.Clamp(
-                    selected,
-                    MinimumDelaySeconds,
-                    MaximumDelaySeconds);
+            backRow.Size =
+                new Size(
+                    MenuWidth -
+                    HorizontalPadding * 2,
+                    HeaderHeight - 4);
 
-            SelectedValue =
-                selected;
-
-            base.OnMouseClick(e);
+            Controls.Add(backRow);
         }
-    }
 
-    // --------------------------------------------------------------------
-    // FENÊTRE DE MODIFICATION DU DÉLAI
-    // --------------------------------------------------------------------
-
-    private static void OpenDelaySettings()
-    {
-        using Form dialog =
-            new Form();
-
-        dialog.Text =
-            "Modifier le délai";
-
-        dialog.FormBorderStyle =
-            FormBorderStyle.FixedDialog;
-
-        dialog.StartPosition =
-            FormStartPosition.CenterScreen;
-
-        dialog.MinimizeBox = false;
-        dialog.MaximizeBox = false;
-        dialog.ShowInTaskbar = false;
-
-        dialog.ClientSize =
-            new Size(400, 185);
-
-        Label label =
-            new Label();
-
-        label.Text =
-            "Délai avant masquage :";
-
-        label.AutoSize =
-            true;
-
-        label.Location =
-            new Point(20, 20);
-
-        DelaySelector selector =
-            new DelaySelector(
-                inactivityDelaySeconds);
-
-        selector.Location =
-            new Point(20, 50);
-
-        selector.Width =
-            360;
-
-        Label valueLabel =
-            new Label();
-
-        valueLabel.Text =
-            $"{selector.SelectedValue} seconde" +
-            (selector.SelectedValue > 1
-                ? "s"
-                : "");
-
-        valueLabel.AutoSize =
-            false;
-
-        valueLabel.TextAlign =
-            ContentAlignment.MiddleCenter;
-
-        valueLabel.Width =
-            360;
-
-        valueLabel.Height =
-            25;
-
-        valueLabel.Location =
-            new Point(20, 105);
-
-        selector.MouseClick +=
-            (_, _) =>
-            {
-                valueLabel.Text =
-                    $"{selector.SelectedValue} seconde" +
-                    (selector.SelectedValue > 1
-                        ? "s"
-                        : "");
-            };
-
-        Button cancelButton =
-            new Button();
-
-        cancelButton.Text =
-            "Annuler";
-
-        cancelButton.DialogResult =
-            DialogResult.Cancel;
-
-        cancelButton.Location =
-            new Point(215, 145);
-
-        Button saveButton =
-            new Button();
-
-        saveButton.Text =
-            "Enregistrer";
-
-        saveButton.DialogResult =
-            DialogResult.OK;
-
-        saveButton.Location =
-            new Point(305, 145);
-
-        dialog.Controls.Add(label);
-        dialog.Controls.Add(selector);
-        dialog.Controls.Add(valueLabel);
-        dialog.Controls.Add(cancelButton);
-        dialog.Controls.Add(saveButton);
-
-        dialog.AcceptButton =
-            saveButton;
-
-        dialog.CancelButton =
-            cancelButton;
-
-        DialogResult result =
-            dialog.ShowDialog();
-
-        if (result !=
-            DialogResult.OK)
+        private void AddSeparator(int y)
         {
-            return;
+            Panel separator =
+                new Panel
+                {
+                    Location =
+                        new Point(
+                            14,
+                            y),
+                    Size =
+                        new Size(
+                            MenuWidth - 28,
+                            1),
+                    BackColor =
+                        MenuBorder
+                };
+
+            Controls.Add(separator);
         }
 
-        inactivityDelaySeconds =
-            selector.SelectedValue;
+        private void AddRow(
+            string icon,
+            string text,
+            int y,
+            Action action,
+            bool checkedState = false,
+            bool chevron = false,
+            Icon? image = null)
+        {
+            MenuRow row =
+                new MenuRow(
+                    icon,
+                    image,
+                    text,
+                    checkedState,
+                    chevron,
+                    true,
+                    AccentBlue,
+                    PrimaryText,
+                    action);
 
-        SaveSettings();
+            row.Location =
+                new Point(
+                    HorizontalPadding,
+                    y);
 
-        lastMouseMovement =
-            DateTime.Now;
+            row.Size =
+                new Size(
+                    MenuWidth -
+                    HorizontalPadding * 2,
+                    RowHeight);
 
-        ShowIcons();
+            Controls.Add(row);
+        }
 
-        UpdateTrayMenu();
+        public static ModernMenuForm CreateMainMenu(
+            bool enabled,
+            Action enableAction,
+            Action disableAction,
+            Action settingsAction,
+            Action exitAction)
+        {
+            ModernMenuForm form =
+                new ModernMenuForm(
+                    HeaderHeight +
+                    RowHeight * 2 +
+                    2 +
+                    RowHeight +
+                    2 +
+                    RowHeight +
+                    12);
+
+            form.AddHeader(
+                "Wallpaper Icon Hider",
+                null);
+
+            form.AddRow(
+                "",
+                "Activer",
+                HeaderHeight,
+                enableAction,
+                enabled,
+                false,
+                trayIconOpen);
+
+            form.AddRow(
+                "",
+                "Désactiver",
+                HeaderHeight + RowHeight,
+                disableAction,
+                !enabled,
+                false,
+                trayIconClosed);
+
+            int separator1 =
+                HeaderHeight +
+                RowHeight * 2;
+
+            form.AddSeparator(separator1);
+
+            form.AddRow(
+                "⚙",
+                "Paramètres",
+                separator1 + 2,
+                settingsAction,
+                false,
+                true);
+
+            int separator2 =
+                separator1 + 2 + RowHeight;
+
+            form.AddSeparator(separator2);
+
+            form.AddRow(
+                "×",
+                "Quitter",
+                separator2 + 2,
+                exitAction);
+
+            return form;
+        }
+
+        public static ModernMenuForm CreateSettingsMenu(
+            int delay,
+            bool startupEnabled,
+            Action delayAction,
+            Action startupAction,
+            Action backAction)
+        {
+            ModernMenuForm form =
+                new ModernMenuForm(
+                    HeaderHeight +
+                    RowHeight * 2 +
+                    2 +
+                    12);
+
+            form.AddHeader(
+                "Paramètres",
+                backAction);
+
+            int firstRowY = HeaderHeight;
+
+            form.AddRow(
+                "⏱",
+                $"Délai de masquage : {delay} s",
+                firstRowY,
+                delayAction,
+                false,
+                true);
+
+            form.AddRow(
+                "□",
+                "Démarrer avec Windows",
+                firstRowY + RowHeight,
+                startupAction,
+                startupEnabled);
+
+            return form;
+        }
+
+        public static ModernMenuForm CreateDelayMenu(
+            int selectedDelay,
+            Action<int> selectAction,
+            Action backAction)
+        {
+            int height =
+                HeaderHeight +
+                RowHeight * MaximumDelaySeconds +
+                12;
+
+            ModernMenuForm form =
+                new ModernMenuForm(height);
+
+            form.AddHeader(
+                "Délai de masquage",
+                backAction);
+
+            for (int i = MinimumDelaySeconds;
+                 i <= MaximumDelaySeconds;
+                 i++)
+            {
+                int value = i;
+
+                form.AddRow(
+                    " ",
+                    $"{value} seconde" +
+                    (value > 1 ? "s" : ""),
+                    HeaderHeight +
+                    (value - 1) * RowHeight,
+                    () => selectAction(value),
+                    value == selectedDelay);
+            }
+
+            return form;
+        }
+
+        private sealed class MenuRow : Control
+        {
+            private readonly string iconText;
+            private readonly Icon? rowIcon;
+            private readonly string rowText;
+            private readonly bool checkState;
+            private readonly bool showChevron;
+            private readonly bool selectable;
+            private readonly Color accentColor;
+            private readonly Color textColor;
+            private readonly Action action;
+
+            private bool hovered;
+
+            public MenuRow(
+                string iconText,
+                Icon? rowIcon,
+                string rowText,
+                bool checkState,
+                bool showChevron,
+                bool selectable,
+                Color accentColor,
+                Color textColor,
+                Action action)
+            {
+                this.iconText = iconText;
+                this.rowIcon = rowIcon;
+                this.rowText = rowText;
+                this.checkState = checkState;
+                this.showChevron = showChevron;
+                this.selectable = selectable;
+                this.accentColor = accentColor;
+                this.textColor = textColor;
+                this.action = action;
+
+                Cursor =
+                    Cursors.Hand;
+
+                DoubleBuffered = true;
+            }
+
+            protected override void OnPaint(
+                PaintEventArgs e)
+            {
+                base.OnPaint(e);
+
+                Graphics g = e.Graphics;
+                g.SmoothingMode =
+                    System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                g.TextRenderingHint =
+                    System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+                Rectangle background =
+                    new Rectangle(
+                        0,
+                        1,
+                        Width,
+                        Height - 2);
+
+                if (hovered)
+                {
+                    using Brush hoverBrush =
+                        new SolidBrush(
+                            HoverBackground);
+
+                    using GraphicsPath hoverPath =
+                        CreateRoundedPath(
+                            background,
+                            8);
+
+                    g.FillPath(
+                        hoverBrush,
+                        hoverPath);
+                }
+
+                if (rowIcon != null)
+                {
+                    g.DrawIcon(
+                        rowIcon,
+                        new Rectangle(
+                            12,
+                            (Height - 18) / 2,
+                            18,
+                            18));
+                }
+                else if (!string.IsNullOrEmpty(iconText))
+                {
+                    using Font iconFont =
+                        new Font(
+                            "Segoe UI Symbol",
+                            11f,
+                            FontStyle.Regular,
+                            GraphicsUnit.Point);
+
+                    using Brush iconBrush =
+                        new SolidBrush(
+                            hovered
+                                ? accentColor
+                                : SecondaryText);
+
+                    g.DrawString(
+                        iconText,
+                        iconFont,
+                        iconBrush,
+                        new PointF(
+                            12,
+                            (Height - iconFont.GetHeight(g)) / 2f - 1));
+                }
+
+                using Font textFont =
+                    new Font(
+                        "Segoe UI",
+                        9.5f,
+                        FontStyle.Regular,
+                        GraphicsUnit.Point);
+
+                using Brush textBrush =
+                    new SolidBrush(textColor);
+
+                g.DrawString(
+                    rowText,
+                    textFont,
+                    textBrush,
+                    new PointF(
+                        43,
+                        (Height - textFont.GetHeight(g)) / 2f - 1));
+
+                if (checkState)
+                {
+                    using Font checkFont =
+                        new Font(
+                            "Segoe UI Symbol",
+                            10f,
+                            FontStyle.Bold,
+                            GraphicsUnit.Point);
+
+                    using Brush checkBrush =
+                        new SolidBrush(accentColor);
+
+                    SizeF checkSize =
+                        g.MeasureString(
+                            "✓",
+                            checkFont);
+
+                    g.DrawString(
+                        "✓",
+                        checkFont,
+                        checkBrush,
+                        new PointF(
+                            Width - checkSize.Width - 13,
+                            (Height - checkFont.GetHeight(g)) / 2f - 1));
+                }
+
+                if (showChevron)
+                {
+                    using Font chevronFont =
+                        new Font(
+                            "Segoe UI Symbol",
+                            12f,
+                            FontStyle.Regular,
+                            GraphicsUnit.Point);
+
+                    using Brush chevronBrush =
+                        new SolidBrush(SecondaryText);
+
+                    g.DrawString(
+                        "›",
+                        chevronFont,
+                        chevronBrush,
+                        new PointF(
+                            Width - 25,
+                            (Height - chevronFont.GetHeight(g)) / 2f - 1));
+                }
+            }
+
+            protected override void OnMouseEnter(EventArgs e)
+            {
+                hovered = true;
+                Invalidate();
+                base.OnMouseEnter(e);
+            }
+
+            protected override void OnMouseLeave(EventArgs e)
+            {
+                hovered = false;
+                Invalidate();
+                base.OnMouseLeave(e);
+            }
+
+            protected override void OnMouseUp(
+                MouseEventArgs e)
+            {
+                if (selectable &&
+                    e.Button == MouseButtons.Left)
+                {
+                    action();
+                }
+
+                base.OnMouseUp(e);
+            }
+        }
     }
 
     // --------------------------------------------------------------------
@@ -1557,123 +2096,23 @@ class Program
         trayIcon.Text =
             "Wallpaper Icon Hider";
 
-        // ---------------------------------------------------------------
-        // MENU PRINCIPAL
-        // ---------------------------------------------------------------
-
-        ContextMenuStrip menu =
-            new ContextMenuStrip();
-
-        enableItem =
-            new ToolStripMenuItem(
-                "Activer");
-
-        disableItem =
-            new ToolStripMenuItem(
-                "Désactiver");
-
-        delayItem =
-            new ToolStripMenuItem();
-
-        delayItem.Enabled =
-            false;
+        trayIcon.Visible = true;
 
         // ---------------------------------------------------------------
-        // SOUS-MENU PARAMÈTRES
+        // MENU CONTEXTUEL PERSONNALISÉ
         // ---------------------------------------------------------------
 
-        ToolStripMenuItem settingsMenu =
-            new ToolStripMenuItem(
-                "⚙ Paramètres");
-
-        ToolStripMenuItem modifyDelayItem =
-            new ToolStripMenuItem(
-                "⏱ Modifier le délai...");
-
-        startupItem =
-            new ToolStripMenuItem(
-                "Démarrer avec Windows");
-
-        startupItem.CheckOnClick =
-            true;
-
-        startupItem.Checked =
-            startWithWindows;
-
-        settingsMenu.DropDownItems.Add(
-            modifyDelayItem);
-
-        settingsMenu.DropDownItems.Add(
-            startupItem);
-
-        // ---------------------------------------------------------------
-        // QUITTER
-        // ---------------------------------------------------------------
-
-        ToolStripMenuItem exitItem =
-            new ToolStripMenuItem(
-                "✕ Quitter");
-
-        // ---------------------------------------------------------------
-        // CONSTRUCTION DU MENU
-        // ---------------------------------------------------------------
-
-        menu.Items.Add(
-            enableItem);
-
-        menu.Items.Add(
-            disableItem);
-
-        menu.Items.Add(
-            new ToolStripSeparator());
-
-        menu.Items.Add(
-            delayItem);
-
-        menu.Items.Add(
-            settingsMenu);
-
-        menu.Items.Add(
-            new ToolStripSeparator());
-
-        menu.Items.Add(
-            exitItem);
-
-        trayIcon.ContextMenuStrip =
-            menu;
-
-        // ---------------------------------------------------------------
-        // ACTIONS
-        // ---------------------------------------------------------------
-
-        enableItem.Click +=
-            (_, _) =>
-                EnableProgram();
-
-        disableItem.Click +=
-            (_, _) =>
-                DisableProgram();
-
-        modifyDelayItem.Click +=
-            (_, _) =>
-                OpenDelaySettings();
-
-        startupItem.Click +=
-            (_, _) =>
+        // Le menu natif ContextMenuStrip est remplacé par notre propre
+        // fenêtre WinForms afin de pouvoir reproduire un rendu moderne :
+        // coins arrondis, ombre, couleurs Windows 11 et survol personnalisé.
+        trayIcon.MouseUp +=
+            (_, e) =>
             {
-                UpdateStartupSetting(
-                    startupItem.Checked);
+                if (e.Button == MouseButtons.Right)
+                {
+                    ShowMainMenu();
+                }
             };
-
-        exitItem.Click +=
-            (_, _) =>
-                Application.Exit();
-
-        UpdateTrayMenu();
-        UpdateTrayIcon();
-
-        trayIcon.Visible =
-            true;
 
         // ---------------------------------------------------------------
         // TIMER
