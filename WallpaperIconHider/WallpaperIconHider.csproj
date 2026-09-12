@@ -1,11 +1,14 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net10.0-windows</TargetFramework>
+		<UseWindowsForms>true</UseWindowsForms>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+	</PropertyGroup>
 
-  <PropertyGroup>
-	<OutputType>WinExe</OutputType>
-	<TargetFramework>net10.0-windows</TargetFramework>
-	<UseWindowsForms>true</UseWindowsForms>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
-
+	<ItemGroup>
+		<EmbeddedResource Include="Resources\Eye_open.ico" LogicalName="Eye_open.ico" />
+		<EmbeddedResource Include="Resources\Eye_close.ico" LogicalName="Eye_close.ico" />
+	</ItemGroup>
 </Project>

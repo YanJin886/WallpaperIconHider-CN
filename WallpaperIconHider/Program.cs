@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Windows.Forms;
@@ -110,6 +111,11 @@ class Program
 
     private static NotifyIcon? trayIcon;
     private static System.Windows.Forms.Timer? mouseTimer;
+
+    // Icônes de la zone de notification.
+    // Elles sont embarquées directement dans l'exécutable.
+    private static Icon? trayIconOpen;
+    private static Icon? trayIconClosed;
 
     // --------------------------------------------------------------------
     // JOURNAL DE DIAGNOSTIC
@@ -850,6 +856,7 @@ class Program
 
         ShowIcons();
 
+        UpdateTrayIcon();
         UpdateTrayMenu();
     }
 
@@ -862,6 +869,7 @@ class Program
 
         ShowIcons();
 
+        UpdateTrayIcon();
         UpdateTrayMenu();
     }
 
@@ -1067,6 +1075,72 @@ class Program
             // L'exception est absorbée afin que le timer
             // et l'interface WinForms puissent continuer
             // à fonctionner.
+        }
+    }
+
+    // --------------------------------------------------------------------
+    // ICÔNES SYSTRAY
+    // --------------------------------------------------------------------
+
+    private static Icon? LoadEmbeddedIcon(string resourceName)
+    {
+        try
+        {
+            Assembly assembly =
+                Assembly.GetExecutingAssembly();
+
+            using Stream? stream =
+                assembly.GetManifestResourceStream(
+                    resourceName);
+
+            if (stream == null)
+            {
+                WriteLog(
+                    $"ERREUR : ressource d'icône introuvable : " +
+                    $"{resourceName}.");
+
+                return null;
+            }
+
+            // On clone l'icône avant de fermer le flux afin que
+            // l'icône reste autonome pendant toute la durée du programme.
+            using Icon icon =
+                new Icon(stream);
+
+            return (Icon)icon.Clone();
+        }
+        catch (Exception ex)
+        {
+            WriteLog(
+                $"ERREUR chargement icône {resourceName} : " +
+                $"{ex.GetType().Name}: {ex.Message}");
+
+            return null;
+        }
+    }
+
+    private static void LoadTrayIcons()
+    {
+        trayIconOpen =
+            LoadEmbeddedIcon("Eye_open.ico");
+
+        trayIconClosed =
+            LoadEmbeddedIcon("Eye_close.ico");
+    }
+
+    private static void UpdateTrayIcon()
+    {
+        if (trayIcon == null)
+            return;
+
+        Icon? newIcon =
+            programEnabled
+                ? trayIconOpen
+                : trayIconClosed;
+
+        if (newIcon != null)
+        {
+            trayIcon.Icon = newIcon;
         }
     }
 
@@ -1470,11 +1544,15 @@ class Program
         // ICÔNE SYSTRAY
         // ---------------------------------------------------------------
 
+        // Charger les deux icônes embarquées dans l'exécutable.
+        LoadTrayIcons();
+
         trayIcon =
             new NotifyIcon();
 
         trayIcon.Icon =
-            SystemIcons.Application;
+            trayIconOpen
+            ?? SystemIcons.Application;
 
         trayIcon.Text =
             "Wallpaper Icon Hider";
@@ -1592,6 +1670,7 @@ class Program
                 Application.Exit();
 
         UpdateTrayMenu();
+        UpdateTrayIcon();
 
         trayIcon.Visible =
             true;
