@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
 class Program
@@ -93,8 +94,8 @@ class Program
     // CONFIGURATION
     // --------------------------------------------------------------------
 
-    private const string WallpaperEnginePath =
-        @"C:\Program Files (x86)\Steam\steamapps\common\wallpaper_engine\wallpaper64.exe";
+    // Chemin détecté automatiquement vers Wallpaper Engine.
+    private static string? wallpaperEnginePath;
 
     private const int DefaultInactivityDelaySeconds = 5;
     private const int MinimumDelaySeconds = 1;
@@ -314,6 +315,8 @@ class Program
             DefaultInactivityDelaySeconds;
 
         public bool StartWithWindows { get; set; } = false;
+
+        public string? InstalledExecutablePath { get; set; }
     }
 
     private static string GetSettingsDirectory()
@@ -438,6 +441,528 @@ class Program
     private const string StartupShortcutName =
         "Wallpaper Icon Hider.lnk";
 
+    // --------------------------------------------------------------------
+    // INSTALLATION
+    // --------------------------------------------------------------------
+
+    private const string InstalledExecutableSetting =
+        "InstalledExecutablePath";
+
+    private static bool installationCompleted = false;
+
+    private static string GetInstalledExecutablePath()
+    {
+        try
+        {
+            string path = GetSettingsPath();
+
+            if (!File.Exists(path))
+                return "";
+
+            string json = File.ReadAllText(path);
+            using JsonDocument document = JsonDocument.Parse(json);
+
+            if (document.RootElement.TryGetProperty(
+                    InstalledExecutableSetting,
+                    out JsonElement element))
+            {
+                return element.GetString() ?? "";
+            }
+        }
+        catch
+        {
+            // Une erreur de lecture ne doit pas faire planter
+            // l'application.
+        }
+
+        return "";
+    }
+
+    private static bool IsInstallationCompleted()
+    {
+        string installedPath = GetInstalledExecutablePath();
+
+        if (string.IsNullOrWhiteSpace(installedPath))
+            return false;
+
+        return File.Exists(installedPath);
+    }
+
+    private static bool SaveInstalledExecutablePath(string executablePath)
+    {
+        try
+        {
+            string directory = GetSettingsDirectory();
+            Directory.CreateDirectory(directory);
+
+            Settings settings;
+
+            string settingsPath = GetSettingsPath();
+
+            if (File.Exists(settingsPath))
+            {
+                string json = File.ReadAllText(settingsPath);
+
+                settings =
+                    JsonSerializer.Deserialize<Settings>(json)
+                    ?? new Settings();
+            }
+            else
+            {
+                settings = new Settings();
+            }
+
+            settings.InstalledExecutablePath =
+                executablePath;
+
+            JsonSerializerOptions options =
+                new JsonSerializerOptions
+                {
+                    WriteIndented = true
+                };
+
+            File.WriteAllText(
+                settingsPath,
+                JsonSerializer.Serialize(
+                    settings,
+                    options));
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private sealed class InstallationForm : Form
+    {
+        private readonly TextBox destinationTextBox;
+
+        public string SelectedPath =>
+            destinationTextBox.Text.Trim();
+
+        public InstallationForm()
+        {
+            Text =
+                "Installation de Wallpaper Icon Hider";
+
+            StartPosition =
+                FormStartPosition.CenterScreen;
+
+            FormBorderStyle =
+                FormBorderStyle.FixedDialog;
+
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ShowInTaskbar = true;
+
+            ClientSize =
+                new Size(520, 250);
+
+            Font =
+                new Font(
+                    "Segoe UI",
+                    9.5f,
+                    FontStyle.Regular,
+                    GraphicsUnit.Point);
+
+            Label titleLabel =
+                new Label
+                {
+                    AutoSize = false,
+                    Location = new Point(28, 22),
+                    Size = new Size(460, 32),
+                    Text =
+                        "Bienvenue dans Wallpaper Icon Hider",
+                    Font =
+                        new Font(
+                            "Segoe UI Semibold",
+                            15f,
+                            FontStyle.Bold),
+                    ForeColor =
+                        Color.FromArgb(32, 32, 32)
+                };
+
+            Controls.Add(titleLabel);
+
+            Label descriptionLabel =
+                new Label
+                {
+                    AutoSize = false,
+                    Location = new Point(30, 66),
+                    Size = new Size(455, 44),
+                    Text =
+                        "Choisissez le dossier dans lequel Wallpaper Icon Hider sera installé.",
+                    ForeColor =
+                        Color.FromArgb(80, 80, 80)
+                };
+
+            Controls.Add(descriptionLabel);
+
+            destinationTextBox =
+                new TextBox
+                {
+                    Location = new Point(30, 121),
+                    Size = new Size(350, 28),
+                    Text =
+                        Path.Combine(
+                            Environment.GetFolderPath(
+                                Environment.SpecialFolder.LocalApplicationData),
+                            "Programs",
+                            "Wallpaper Icon Hider")
+                };
+
+            Controls.Add(destinationTextBox);
+
+            Button browseButton =
+                new Button
+                {
+                    Text = "Parcourir...",
+                    Location = new Point(390, 120),
+                    Size = new Size(100, 30)
+                };
+
+            browseButton.Click +=
+                (_, _) =>
+                {
+                    using FolderBrowserDialog dialog =
+                        new FolderBrowserDialog
+                        {
+                            Description =
+                                "Choisissez le dossier d'installation.",
+                            UseDescriptionForTitle = true,
+                            SelectedPath =
+                                Directory.Exists(
+                                    destinationTextBox.Text)
+                                    ? destinationTextBox.Text
+                                    : Environment.GetFolderPath(
+                                        Environment.SpecialFolder.LocalApplicationData)
+                        };
+
+                    if (dialog.ShowDialog(this) ==
+                        DialogResult.OK)
+                    {
+                        destinationTextBox.Text =
+                            dialog.SelectedPath;
+                    }
+                };
+
+            Controls.Add(browseButton);
+
+            Label infoLabel =
+                new Label
+                {
+                    AutoSize = false,
+                    Location = new Point(30, 160),
+                    Size = new Size(460, 40),
+                    Text =
+                        "Wallpaper Engine doit être installé via Steam. " +
+                        "L'installation de Wallpaper Icon Hider ne modifie pas Wallpaper Engine.",
+                    ForeColor =
+                        Color.FromArgb(95, 95, 95)
+                };
+
+            Controls.Add(infoLabel);
+
+            Button cancelButton =
+                new Button
+                {
+                    Text = "Annuler",
+                    DialogResult =
+                        DialogResult.Cancel,
+                    Location = new Point(300, 205),
+                    Size = new Size(90, 30)
+                };
+
+            Controls.Add(cancelButton);
+
+            Button installButton =
+                new Button
+                {
+                    Text = "Installer",
+                    DialogResult =
+                        DialogResult.OK,
+                    Location = new Point(400, 205),
+                    Size = new Size(90, 30)
+                };
+
+            installButton.Click +=
+                (_, _) =>
+                {
+                    if (string.IsNullOrWhiteSpace(
+                            destinationTextBox.Text))
+                    {
+                        MessageBox.Show(
+                            this,
+                            "Veuillez choisir un dossier d'installation.",
+                            "Installation",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning);
+
+                        DialogResult =
+                            DialogResult.None;
+                    }
+                };
+
+            Controls.Add(installButton);
+
+            AcceptButton = installButton;
+            CancelButton = cancelButton;
+        }
+    }
+
+    private sealed class InstallationCompleteForm : Form
+    {
+        public bool CreateDesktopShortcut =>
+            shortcutCheckBox.Checked;
+
+        private readonly CheckBox shortcutCheckBox;
+
+        public InstallationCompleteForm()
+        {
+            Text =
+                "Installation terminée";
+
+            StartPosition =
+                FormStartPosition.CenterScreen;
+
+            FormBorderStyle =
+                FormBorderStyle.FixedDialog;
+
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ShowInTaskbar = true;
+
+            ClientSize =
+                new Size(520, 235);
+
+            Font =
+                new Font(
+                    "Segoe UI",
+                    9.5f,
+                    FontStyle.Regular,
+                    GraphicsUnit.Point);
+
+            Label titleLabel =
+                new Label
+                {
+                    AutoSize = false,
+                    Location = new Point(28, 22),
+                    Size = new Size(460, 32),
+                    Text =
+                        "Installation terminée",
+                    Font =
+                        new Font(
+                            "Segoe UI Semibold",
+                            15f,
+                            FontStyle.Bold),
+                    ForeColor =
+                        Color.FromArgb(32, 32, 32)
+                };
+
+            Controls.Add(titleLabel);
+
+            Label descriptionLabel =
+                new Label
+                {
+                    AutoSize = false,
+                    Location = new Point(30, 66),
+                    Size = new Size(455, 45),
+                    Text =
+                        "Wallpaper Icon Hider a été installé avec succès.",
+                    ForeColor =
+                        Color.FromArgb(80, 80, 80)
+                };
+
+            Controls.Add(descriptionLabel);
+
+            shortcutCheckBox =
+                new CheckBox
+                {
+                    AutoSize = true,
+                    Location = new Point(30, 120),
+                    Text =
+                        "Créer un raccourci sur le bureau",
+                    Checked = true
+                };
+
+            Controls.Add(shortcutCheckBox);
+
+            Label infoLabel =
+                new Label
+                {
+                    AutoSize = false,
+                    Location = new Point(30, 150),
+                    Size = new Size(460, 38),
+                    Text =
+                        "Vous pourrez toujours supprimer ce raccourci plus tard.",
+                    ForeColor =
+                        Color.FromArgb(95, 95, 95)
+                };
+
+            Controls.Add(infoLabel);
+
+            Button finishButton =
+                new Button
+                {
+                    Text = "Terminer",
+                    DialogResult =
+                        DialogResult.OK,
+                    Location = new Point(390, 195),
+                    Size = new Size(100, 30)
+                };
+
+            Controls.Add(finishButton);
+
+            AcceptButton = finishButton;
+        }
+    }
+
+    private static bool InstallAndRelaunchIfNeeded()
+    {
+        string currentExecutable =
+            GetExecutablePath();
+
+        if (IsInstallationCompleted())
+        {
+            string installedExecutable =
+                GetInstalledExecutablePath();
+
+            if (!string.Equals(
+                    currentExecutable,
+                    installedExecutable,
+                    StringComparison.OrdinalIgnoreCase) &&
+                File.Exists(installedExecutable))
+            {
+                try
+                {
+                    Process.Start(
+                        new ProcessStartInfo
+                        {
+                            FileName =
+                                installedExecutable,
+                            UseShellExecute = true
+                        });
+
+                    return false;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(
+                        "Impossible de lancer la version installée.\n\n" +
+                        ex.Message,
+                        "Wallpaper Icon Hider",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+
+                    return false;
+                }
+            }
+
+            installationCompleted = true;
+            return true;
+        }
+
+        using InstallationForm form =
+            new InstallationForm();
+
+        DialogResult result =
+            form.ShowDialog();
+
+        if (result != DialogResult.OK)
+        {
+            return false;
+        }
+
+        string destinationDirectory =
+            form.SelectedPath;
+
+        try
+        {
+            Directory.CreateDirectory(
+                destinationDirectory);
+
+            string installedExecutable =
+                Path.Combine(
+                    destinationDirectory,
+                    "WallpaperIconHider.exe");
+
+            File.Copy(
+                currentExecutable,
+                installedExecutable,
+                true);
+
+            if (!SaveInstalledExecutablePath(
+                    installedExecutable))
+            {
+                MessageBox.Show(
+                    "L'application a été copiée, mais ses informations " +
+                    "d'installation n'ont pas pu être enregistrées.",
+                    "Wallpaper Icon Hider",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+
+            using InstallationCompleteForm completionForm =
+                new InstallationCompleteForm();
+
+            DialogResult completionResult =
+                completionForm.ShowDialog();
+
+            if (completionResult ==
+                DialogResult.OK &&
+                completionForm.CreateDesktopShortcut)
+            {
+                if (CreateDesktopShortcut(
+                        installedExecutable))
+                {
+                    WriteLog(
+                        $"Raccourci bureau créé : " +
+                        $"{GetDesktopShortcutPath()}");
+                }
+                else
+                {
+                    MessageBox.Show(
+                        "L'installation est terminée, mais le raccourci " +
+                        "sur le bureau n'a pas pu être créé.",
+                        "Wallpaper Icon Hider",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                }
+            }
+            else
+            {
+                WriteLog(
+                    "Raccourci bureau : non créé.");
+            }
+
+            WriteLog(
+                $"Installation terminée : {installedExecutable}");
+
+            Process.Start(
+                new ProcessStartInfo
+                {
+                    FileName =
+                        installedExecutable,
+                    UseShellExecute = true
+                });
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "L'installation a échoué.\n\n" +
+                ex.Message,
+                "Wallpaper Icon Hider",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+
+            return false;
+        }
+    }
+
     private static string GetStartupDirectory()
     {
         return Environment.GetFolderPath(
@@ -455,6 +980,112 @@ class Program
     {
         return Environment.ProcessPath
             ?? Application.ExecutablePath;
+    }
+
+    // --------------------------------------------------------------------
+    // DÉTECTION DE WALLPAPER ENGINE
+    // --------------------------------------------------------------------
+
+    private static string? GetSteamInstallPathFromRegistry()
+    {
+        try
+        {
+            using Microsoft.Win32.RegistryKey? key =
+                Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                    @"Software\Valve\Steam");
+
+            string? path = key?.GetValue("SteamPath") as string;
+
+            if (!string.IsNullOrWhiteSpace(path) && Directory.Exists(path))
+                return path;
+        }
+        catch { }
+
+        try
+        {
+            using Microsoft.Win32.RegistryKey? key =
+                Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                    @"SOFTWARE\WOW6432Node\Valve\Steam");
+
+            string? path = key?.GetValue("InstallPath") as string;
+
+            if (!string.IsNullOrWhiteSpace(path) && Directory.Exists(path))
+                return path;
+        }
+        catch { }
+
+        return null;
+    }
+
+    private static IEnumerable<string> GetSteamLibraryPaths()
+    {
+        HashSet<string> paths = new(StringComparer.OrdinalIgnoreCase);
+        string? steamPath = GetSteamInstallPathFromRegistry();
+
+        if (string.IsNullOrWhiteSpace(steamPath))
+            return paths;
+
+        paths.Add(Path.GetFullPath(steamPath));
+
+        string libraryFile = Path.Combine(steamPath, "steamapps", "libraryfolders.vdf");
+
+        if (!File.Exists(libraryFile))
+            return paths;
+
+        try
+        {
+            foreach (string line in File.ReadLines(libraryFile))
+            {
+                Match match = Regex.Match(
+                    line,
+                    "\"path\"\\s+\"([^\"]+)\"",
+                    RegexOptions.IgnoreCase);
+
+                if (!match.Success)
+                    continue;
+
+                string libraryPath = match.Groups[1].Value.Replace(@"\\", @"\");
+
+                if (Directory.Exists(libraryPath))
+                    paths.Add(Path.GetFullPath(libraryPath));
+            }
+        }
+        catch { }
+
+        return paths;
+    }
+
+    private static string? FindWallpaperEnginePath()
+    {
+        foreach (string libraryPath in GetSteamLibraryPaths())
+        {
+            string candidate = Path.Combine(
+                libraryPath, "steamapps", "common",
+                "wallpaper_engine", "wallpaper64.exe");
+
+            if (File.Exists(candidate))
+                return candidate;
+        }
+
+        return null;
+    }
+
+    private static bool EnsureWallpaperEnginePath()
+    {
+        if (!string.IsNullOrWhiteSpace(wallpaperEnginePath) &&
+            File.Exists(wallpaperEnginePath))
+            return true;
+
+        wallpaperEnginePath = FindWallpaperEnginePath();
+
+        if (!string.IsNullOrWhiteSpace(wallpaperEnginePath))
+        {
+            WriteLog($"Wallpaper Engine détecté automatiquement : {wallpaperEnginePath}");
+            return true;
+        }
+
+        WriteLog("ERREUR : Wallpaper Engine introuvable.");
+        return false;
     }
 
     private static bool IsStartupShortcutPresent()
@@ -522,6 +1153,66 @@ class Program
         }
     }
 
+    private static string GetDesktopShortcutPath()
+    {
+        return Path.Combine(
+            Environment.GetFolderPath(
+                Environment.SpecialFolder.DesktopDirectory),
+            "Wallpaper Icon Hider.lnk");
+    }
+
+    private static bool CreateDesktopShortcut(
+        string executablePath)
+    {
+        try
+        {
+            string shortcutPath =
+                GetDesktopShortcutPath();
+
+            Type? shellType =
+                Type.GetTypeFromProgID(
+                    "WScript.Shell");
+
+            if (shellType == null)
+                return false;
+
+            dynamic shell =
+                Activator.CreateInstance(
+                    shellType)!;
+
+            dynamic shortcut =
+                shell.CreateShortcut(
+                    shortcutPath);
+
+            shortcut.TargetPath =
+                executablePath;
+
+            shortcut.WorkingDirectory =
+                Path.GetDirectoryName(
+                    executablePath);
+
+            shortcut.Description =
+                "Lance Wallpaper Icon Hider.";
+
+            shortcut.IconLocation =
+                executablePath;
+
+            shortcut.Save();
+
+            Marshal.FinalReleaseComObject(
+                shortcut);
+
+            Marshal.FinalReleaseComObject(
+                shell);
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static void RemoveStartupShortcut()
     {
         try
@@ -580,11 +1271,14 @@ class Program
     {
         try
         {
+            if (!EnsureWallpaperEnginePath())
+                return false;
+
             ProcessStartInfo startInfo =
                 new ProcessStartInfo
                 {
                     FileName =
-                        WallpaperEnginePath,
+                        wallpaperEnginePath!,
 
                     UseShellExecute = false,
 
@@ -2041,6 +2735,14 @@ class Program
     static void Main()
     {
         ApplicationConfiguration.Initialize();
+
+        // Première exécution :
+        // proposer à l'utilisateur le dossier d'installation,
+        // copier l'exécutable et relancer la version installée.
+        if (!InstallAndRelaunchIfNeeded())
+        {
+            return;
+        }
 
         // Charger les préférences.
         LoadSettings();
