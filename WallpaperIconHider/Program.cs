@@ -51,6 +51,56 @@ class Program
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vKey);
 
+    // --------------------------------------------------------------------
+    // CURSEURS SYSTÈME
+    // --------------------------------------------------------------------
+
+    // SetSystemCursor remplace un curseur système de manière globale.
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetSystemCursor(
+        IntPtr hcur,
+        uint id);
+
+    // Recharge les curseurs système configurés par Windows.
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SystemParametersInfo(
+        uint uiAction,
+        uint uiParam,
+        IntPtr pvParam,
+        uint fWinIni);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr CreateCursor(
+        IntPtr hInst,
+        int xHotSpot,
+        int yHotSpot,
+        int nWidth,
+        int nHeight,
+        byte[] pvANDPlane,
+        byte[] pvXORPlane);
+
+    private const uint SPI_SETCURSORS = 0x0057;
+    private const uint SPIF_SENDCHANGE = 0x0002;
+
+    // Identifiants des principaux curseurs système Windows.
+    private static readonly uint[] SystemCursorIds =
+    {
+        32512, // OCR_NORMAL
+        32513, // OCR_IBEAM
+        32514, // OCR_WAIT
+        32515, // OCR_CROSS
+        32516, // OCR_UP
+        32642, // OCR_SIZENWSE
+        32643, // OCR_SIZENESW
+        32644, // OCR_SIZEWE
+        32645, // OCR_SIZENS
+        32646, // OCR_SIZEALL
+        32648, // OCR_NO
+        32649, // OCR_HAND
+        32650, // OCR_APPSTARTING
+        32651  // OCR_HELP
+    };
+
     private const int VK_LBUTTON = 0x01;
     private const int VK_RBUTTON = 0x02;
 
@@ -106,6 +156,11 @@ class Program
 
     private static bool programEnabled = true;
     private static bool iconsAreVisible = true;
+    private static bool cursorIsHidden = false;
+
+    // Indique que l'application a remplacé les curseurs système par des
+    // curseurs transparents. Le remplacement est global à Windows.
+    private static bool systemCursorsReplaced = false;
 
     // --------------------------------------------------------------------
     // SURVEILLANCE SOURIS
@@ -260,6 +315,9 @@ class Program
     // JOURNAL
     // --------------------------------------------------------------------
 
+    private const long MaxLogFileSizeBytes =
+        200L * 1024L * 1024L;
+
     private static string GetLogPath()
     {
         return Path.Combine(
@@ -279,8 +337,23 @@ class Program
 
             lock (logLock)
             {
+                string logPath =
+                    GetLogPath();
+
+                if (File.Exists(logPath))
+                {
+                    FileInfo logFile =
+                        new FileInfo(logPath);
+
+                    if (logFile.Length >=
+                        MaxLogFileSizeBytes)
+                    {
+                        File.Delete(logPath);
+                    }
+                }
+
                 File.AppendAllText(
-                    GetLogPath(),
+                    logPath,
                     line + Environment.NewLine);
             }
         }
@@ -315,6 +388,8 @@ class Program
             DefaultInactivityDelaySeconds;
 
         public bool StartWithWindows { get; set; } = false;
+
+        public bool HideCursorWithIcons { get; set; } = false;
 
         public string? InstalledExecutablePath { get; set; }
     }
@@ -381,6 +456,9 @@ class Program
             startWithWindows =
                 settings.StartWithWindows;
 
+            hideCursorWithIcons =
+                settings.HideCursorWithIcons;
+
             installedExecutablePath =
                 settings.InstalledExecutablePath;
         }
@@ -413,6 +491,9 @@ class Program
                     StartWithWindows =
                         startWithWindows,
 
+                    HideCursorWithIcons =
+                        hideCursorWithIcons,
+
                     InstalledExecutablePath =
                         installedExecutablePath
                 };
@@ -444,6 +525,7 @@ class Program
     // --------------------------------------------------------------------
 
     private static bool startWithWindows = false;
+    private static bool hideCursorWithIcons = false;
 
     private const string StartupShortcutName =
         "Wallpaper Icon Hider.lnk";
@@ -1428,8 +1510,157 @@ class Program
         }
     }
 
+    // --------------------------------------------------------------------
+    // CURSEUR DE SOURIS
+    // --------------------------------------------------------------------
+
+    private static bool ReplaceSystemCursorsWithInvisible()
+    {
+        try
+        {
+            // Curseur monochrome totalement transparent :
+            // AND = 1 partout, XOR = 0 partout.
+            const int cursorSize = 32;
+            int planeSize = cursorSize * cursorSize / 8;
+
+            byte[] andMask = new byte[planeSize];
+            byte[] xorMask = new byte[planeSize];
+
+            Array.Fill(andMask, (byte)0xFF);
+            Array.Fill(xorMask, (byte)0x00);
+
+            int replacedCount = 0;
+
+            foreach (uint cursorId in SystemCursorIds)
+            {
+                IntPtr invisibleCursor =
+                    CreateCursor(
+                        IntPtr.Zero,
+                        0,
+                        0,
+                        cursorSize,
+                        cursorSize,
+                        andMask,
+                        xorMask);
+
+                if (invisibleCursor == IntPtr.Zero)
+                    continue;
+
+                if (SetSystemCursor(
+                        invisibleCursor,
+                        cursorId))
+                {
+                    replacedCount++;
+                }
+                else
+                {
+                    // SetSystemCursor détruit normalement le handle fourni.
+                    // En cas d'échec, le système reste responsable du handle
+                    // selon son propre comportement. On n'effectue donc pas
+                    // de destruction manuelle ici.
+                }
+            }
+
+            if (replacedCount == 0)
+                return false;
+
+            systemCursorsReplaced = true;
+            cursorIsHidden = true;
+
+            WriteLog(
+                $"Curseurs système : MASQUÉS " +
+                $"({replacedCount}/{SystemCursorIds.Length} types remplacés).");
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            WriteLog(
+                $"ERREUR masquage curseurs système : " +
+                $"{ex.GetType().Name}: {ex.Message}");
+
+            return false;
+        }
+    }
+
+    private static void RestoreSystemCursors()
+    {
+        if (!systemCursorsReplaced &&
+            !cursorIsHidden)
+        {
+            return;
+        }
+
+        try
+        {
+            bool restored =
+                SystemParametersInfo(
+                    SPI_SETCURSORS,
+                    0,
+                    IntPtr.Zero,
+                    SPIF_SENDCHANGE);
+
+            systemCursorsReplaced = false;
+            cursorIsHidden = false;
+
+            WriteLog(
+                restored
+                    ? "Curseurs système : RESTAURÉS."
+                    : "AVERTISSEMENT : restauration des curseurs système échouée.");
+        }
+        catch (Exception ex)
+        {
+            systemCursorsReplaced = false;
+            cursorIsHidden = false;
+
+            WriteLog(
+                $"ERREUR restauration curseurs système : " +
+                $"{ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private static void HideMouseCursor()
+    {
+        if (!hideCursorWithIcons ||
+            cursorIsHidden)
+        {
+            return;
+        }
+
+        ReplaceSystemCursorsWithInvisible();
+    }
+
+    private static void ShowMouseCursor()
+    {
+        if (!cursorIsHidden &&
+            !systemCursorsReplaced)
+        {
+            return;
+        }
+
+        RestoreSystemCursors();
+    }
+
+    private static void EnforceHiddenMouseCursor()
+    {
+        // Tant que les icônes sont cachées et que l’option est active,
+        // s’assurer que les curseurs système restent remplacés par la
+        // version transparente. Cette vérification est appelée par le
+        // timer et ne fait rien tant que le remplacement est déjà actif.
+        if (!hideCursorWithIcons ||
+            iconsAreVisible ||
+            systemCursorsReplaced)
+        {
+            return;
+        }
+
+        ReplaceSystemCursorsWithInvisible();
+    }
+
     private static void ShowIcons()
     {
+        ShowMouseCursor();
+
         if (iconsAreVisible)
             return;
 
@@ -1463,6 +1694,8 @@ class Program
 
             WriteLog(
                 "État interne : icônes = CACHÉES.");
+
+            HideMouseCursor();
         }
         else
         {
@@ -1474,6 +1707,7 @@ class Program
     }
 
     // --------------------------------------------------------------------
+
     // DÉTECTION FENÊTRE MAXIMISÉE / PLEIN ÉCRAN
     // --------------------------------------------------------------------
 
@@ -1615,6 +1849,8 @@ class Program
         inactivityBlockedByFullscreen =
             false;
 
+        ShowMouseCursor();
+
         WriteLog(
             "SURVEILLANCE ACTIVÉE.");
 
@@ -1630,6 +1866,7 @@ class Program
         WriteLog(
             "SURVEILLANCE DÉSACTIVÉE.");
 
+        ShowMouseCursor();
         ShowIcons();
 
         UpdateTrayIcon();
@@ -1775,6 +2012,8 @@ class Program
 
             if (mouseMoved)
             {
+                ShowMouseCursor();
+
                 previousMouseX =
                     position.X;
 
@@ -1859,6 +2098,11 @@ class Program
             {
                 HideIcons();
             }
+
+            // Tant que les icônes restent cachées, on réapplique
+            // le masquage du curseur à chaque tick pour éviter qu'il
+            // soit réinjecté par Windows.
+            EnforceHiddenMouseCursor();
         }
         catch (Exception ex)
         {
@@ -2210,6 +2454,7 @@ class Program
         activeMenuForm = ModernMenuForm.CreateSettingsMenu(
             inactivityDelaySeconds,
             startWithWindows,
+            hideCursorWithIcons,
             () =>
             {
                 ShowDelayMenu();
@@ -2217,6 +2462,22 @@ class Program
             () =>
             {
                 UpdateStartupSetting(!startWithWindows);
+                ShowSettingsMenu();
+            },
+            () =>
+            {
+                hideCursorWithIcons =
+                    !hideCursorWithIcons;
+
+                SaveSettings();
+
+                if (!hideCursorWithIcons)
+                    ShowMouseCursor();
+
+                WriteLog(
+                    $"Masquage du curseur avec les icônes : " +
+                    $"{(hideCursorWithIcons ? "ACTIVÉ" : "DÉSACTIVÉ")}.");
+
                 ShowSettingsMenu();
             },
             () =>
@@ -2344,9 +2605,17 @@ class Program
     // FENÊTRE DU MENU MODERNE
     // --------------------------------------------------------------------
 
+    private enum MenuIconKind
+    {
+        None,
+        Text,
+        Windows,
+        Cursor
+    }
+
     private sealed class ModernMenuForm : Form
     {
-        private const int MenuWidth = 260;
+        private const int MenuWidth = 360;
         private const int RowHeight = 42;
         private const int HeaderHeight = 44;
         private const int HorizontalPadding = 8;
@@ -2620,7 +2889,8 @@ class Program
             Action action,
             bool checkedState = false,
             bool chevron = false,
-            Icon? image = null)
+            Icon? image = null,
+            MenuIconKind iconKind = MenuIconKind.Text)
         {
             MenuRow row =
                 new MenuRow(
@@ -2632,7 +2902,8 @@ class Program
                     true,
                     AccentBlue,
                     PrimaryText,
-                    action);
+                    action,
+                    iconKind);
 
             row.Location =
                 new Point(
@@ -2718,14 +2989,16 @@ class Program
         public static ModernMenuForm CreateSettingsMenu(
             int delay,
             bool startupEnabled,
+            bool hideCursorEnabled,
             Action delayAction,
             Action startupAction,
+            Action cursorAction,
             Action backAction)
         {
             ModernMenuForm form =
                 new ModernMenuForm(
                     HeaderHeight +
-                    RowHeight * 2 +
+                    RowHeight * 3 +
                     2 +
                     12);
 
@@ -2744,11 +3017,24 @@ class Program
                 true);
 
             form.AddRow(
-                "□",
+                "",
                 "Démarrer avec Windows",
                 firstRowY + RowHeight,
                 startupAction,
-                startupEnabled);
+                startupEnabled,
+                false,
+                null,
+                MenuIconKind.Windows);
+
+            form.AddRow(
+                "",
+                "Masquer le curseur avec les icônes",
+                firstRowY + RowHeight * 2,
+                cursorAction,
+                hideCursorEnabled,
+                false,
+                null,
+                MenuIconKind.Cursor);
 
             return form;
         }
@@ -2793,6 +3079,7 @@ class Program
         {
             private readonly string iconText;
             private readonly Icon? rowIcon;
+            private readonly MenuIconKind iconKind;
             private readonly string rowText;
             private readonly bool checkState;
             private readonly bool showChevron;
@@ -2812,10 +3099,12 @@ class Program
                 bool selectable,
                 Color accentColor,
                 Color textColor,
-                Action action)
+                Action action,
+                MenuIconKind iconKind = MenuIconKind.Text)
             {
                 this.iconText = iconText;
                 this.rowIcon = rowIcon;
+                this.iconKind = iconKind;
                 this.rowText = rowText;
                 this.checkState = checkState;
                 this.showChevron = showChevron;
@@ -2864,6 +3153,11 @@ class Program
                         hoverPath);
                 }
 
+                Color iconColor =
+                    hovered
+                        ? accentColor
+                        : SecondaryText;
+
                 if (rowIcon != null)
                 {
                     g.DrawIcon(
@@ -2873,6 +3167,14 @@ class Program
                             (Height - 18) / 2,
                             18,
                             18));
+                }
+                else if (iconKind == MenuIconKind.Windows)
+                {
+                    DrawWindowsIcon(g, iconColor);
+                }
+                else if (iconKind == MenuIconKind.Cursor)
+                {
+                    DrawCursorIcon(g, iconColor);
                 }
                 else if (!string.IsNullOrEmpty(iconText))
                 {
@@ -2884,10 +3186,7 @@ class Program
                             GraphicsUnit.Point);
 
                     using Brush iconBrush =
-                        new SolidBrush(
-                            hovered
-                                ? accentColor
-                                : SecondaryText);
+                        new SolidBrush(iconColor);
 
                     g.DrawString(
                         iconText,
@@ -2962,6 +3261,42 @@ class Program
                             Width - 25,
                             (Height - chevronFont.GetHeight(g)) / 2f - 1));
                 }
+            }
+
+            private void DrawWindowsIcon(Graphics g, Color color)
+            {
+                using Brush brush = new SolidBrush(color);
+
+                int x = 12;
+                int y = (Height - 17) / 2;
+
+                g.FillRectangle(brush, x, y, 8, 7);
+                g.FillRectangle(brush, x + 10, y, 8, 7);
+                g.FillRectangle(brush, x, y + 10, 8, 7);
+                g.FillRectangle(brush, x + 10, y + 10, 8, 7);
+            }
+
+            private void DrawCursorIcon(Graphics g, Color color)
+            {
+                PointF[] points =
+                {
+                    new PointF(12, 12),
+                    new PointF(12, 30),
+                    new PointF(17, 25),
+                    new PointF(22, 32),
+                    new PointF(26, 29.5f),
+                    new PointF(21, 23),
+                    new PointF(29, 23)
+                };
+
+                using Brush brush = new SolidBrush(color);
+                using Pen pen = new Pen(MenuBackground, 1.5f)
+                {
+                    LineJoin = LineJoin.Round
+                };
+
+                g.FillPolygon(brush, points);
+                g.DrawPolygon(pen, points);
             }
 
             protected override void OnMouseEnter(EventArgs e)
@@ -3043,6 +3378,8 @@ class Program
             "Sécurité au démarrage : " +
             "commande showIcons envoyée.");
 
+        ShowMouseCursor();
+
         lastMouseMovement =
             DateTime.Now;
 
@@ -3116,7 +3453,9 @@ class Program
                     "ARRÊT DE L'APPLICATION.");
 
                 // Toujours restaurer les icônes
-                // avant de quitter.
+                // et le curseur avant de quitter.
+                ShowMouseCursor();
+
                 SendWallpaperCommand(
                     "showIcons",
                     true);
