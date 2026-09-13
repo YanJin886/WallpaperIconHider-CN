@@ -1,0 +1,22 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Build output
+bin/
+obj/
+
+# Test results
+TestResults/
+*.trx
+
+# Runtime / local files
+*.log
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Publish output
+publish/
