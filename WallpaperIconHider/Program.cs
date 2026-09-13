@@ -380,6 +380,9 @@ class Program
 
             startWithWindows =
                 settings.StartWithWindows;
+
+            installedExecutablePath =
+                settings.InstalledExecutablePath;
         }
         catch
         {
@@ -387,6 +390,7 @@ class Program
                 DefaultInactivityDelaySeconds;
 
             startWithWindows = false;
+            installedExecutablePath = null;
         }
     }
 
@@ -407,7 +411,10 @@ class Program
                         inactivityDelaySeconds,
 
                     StartWithWindows =
-                        startWithWindows
+                        startWithWindows,
+
+                    InstalledExecutablePath =
+                        installedExecutablePath
                 };
 
             JsonSerializerOptions options =
@@ -450,8 +457,13 @@ class Program
 
     private static bool installationCompleted = false;
 
+    private static string? installedExecutablePath;
+
     private static string GetInstalledExecutablePath()
     {
+        if (!string.IsNullOrWhiteSpace(installedExecutablePath))
+            return installedExecutablePath;
+
         try
         {
             string path = GetSettingsPath();
@@ -526,6 +538,9 @@ class Program
                 JsonSerializer.Serialize(
                     settings,
                     options));
+
+            installedExecutablePath =
+                executablePath;
 
             return true;
         }
@@ -717,7 +732,11 @@ class Program
         public bool CreateDesktopShortcut =>
             shortcutCheckBox.Checked;
 
+        public bool LaunchApplication =>
+            launchCheckBox.Checked;
+
         private readonly CheckBox shortcutCheckBox;
+        private readonly CheckBox launchCheckBox;
 
         public InstallationCompleteForm()
         {
@@ -735,7 +754,7 @@ class Program
             ShowInTaskbar = true;
 
             ClientSize =
-                new Size(520, 235);
+                new Size(520, 260);
 
             Font =
                 new Font(
@@ -789,14 +808,26 @@ class Program
 
             Controls.Add(shortcutCheckBox);
 
+            launchCheckBox =
+                new CheckBox
+                {
+                    AutoSize = true,
+                    Location = new Point(30, 150),
+                    Text =
+                        "Lancer Wallpaper Icon Hider maintenant",
+                    Checked = true
+                };
+
+            Controls.Add(launchCheckBox);
+
             Label infoLabel =
                 new Label
                 {
                     AutoSize = false,
-                    Location = new Point(30, 150),
+                    Location = new Point(30, 180),
                     Size = new Size(460, 38),
                     Text =
-                        "Vous pourrez toujours supprimer ce raccourci plus tard.",
+                        "Vous pourrez toujours modifier ces choix plus tard.",
                     ForeColor =
                         Color.FromArgb(95, 95, 95)
                 };
@@ -809,7 +840,7 @@ class Program
                     Text = "Terminer",
                     DialogResult =
                         DialogResult.OK,
-                    Location = new Point(390, 195),
+                    Location = new Point(390, 220),
                     Size = new Size(100, 30)
                 };
 
@@ -904,6 +935,9 @@ class Program
                     MessageBoxIcon.Warning);
             }
 
+            installedExecutablePath =
+                installedExecutable;
+
             using InstallationCompleteForm completionForm =
                 new InstallationCompleteForm();
 
@@ -940,13 +974,41 @@ class Program
             WriteLog(
                 $"Installation terminée : {installedExecutable}");
 
-            Process.Start(
-                new ProcessStartInfo
+            if (completionForm.LaunchApplication)
+            {
+                try
                 {
-                    FileName =
-                        installedExecutable,
-                    UseShellExecute = true
-                });
+                    Process.Start(
+                        new ProcessStartInfo
+                        {
+                            FileName =
+                                installedExecutable,
+                            UseShellExecute = true
+                        });
+
+                    WriteLog(
+                        "Lancement immédiat de l'application demandé.");
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(
+                        "L'installation est terminée, mais l'application " +
+                        "n'a pas pu être lancée.\n\n" +
+                        ex.Message,
+                        "Wallpaper Icon Hider",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+
+                    WriteLog(
+                        $"ERREUR lancement immédiat : " +
+                        $"{ex.GetType().Name}: {ex.Message}");
+                }
+            }
+            else
+            {
+                WriteLog(
+                    "Lancement immédiat de l'application désactivé.");
+            }
 
             return false;
         }
@@ -1858,6 +1920,209 @@ class Program
 
         trayIconClosed =
             LoadEmbeddedIcon("Eye_close.ico");
+    }
+
+    private static void ShowStartupNotification()
+    {
+        try
+        {
+            Point cursorPosition = Cursor.Position;
+            Screen screen =
+                Screen.FromPoint(cursorPosition);
+
+            Rectangle workingArea =
+                screen.WorkingArea;
+
+            Form notification =
+                new Form
+                {
+                    FormBorderStyle =
+                        FormBorderStyle.None,
+
+                    ShowInTaskbar =
+                        false,
+
+                    ShowIcon =
+                        false,
+
+                    TopMost =
+                        true,
+
+                    StartPosition =
+                        FormStartPosition.Manual,
+
+                    ClientSize =
+                        new Size(320, 72),
+
+                    BackColor =
+                        Color.FromArgb(249, 249, 250)
+                };
+
+            notification.FormClosed +=
+                (_, _) => notification.Dispose();
+
+            // Coins arrondis.
+            using (GraphicsPath path =
+                CreateRoundedNotificationPath(
+                    new Rectangle(
+                        0,
+                        0,
+                        notification.Width,
+                        notification.Height),
+                    14))
+            {
+                notification.Region =
+                    new Region(path);
+            }
+
+            // Ombre native Windows discrète.
+            notification.CreateControl();
+            SetNotificationShadow(notification);
+
+            Label titleLabel =
+                new Label
+                {
+                    AutoSize = false,
+                    Location = new Point(18, 10),
+                    Size = new Size(280, 22),
+                    Text =
+                        "Wallpaper Icon Hider",
+                    Font =
+                        new Font(
+                            "Segoe UI Semibold",
+                            10f,
+                            FontStyle.Bold),
+                    ForeColor =
+                        Color.FromArgb(32, 32, 32)
+                };
+
+            notification.Controls.Add(titleLabel);
+
+            Label messageLabel =
+                new Label
+                {
+                    AutoSize = false,
+                    Location = new Point(18, 34),
+                    Size = new Size(280, 28),
+                    Text =
+                        "L'application est maintenant active en arrière-plan.",
+                    Font =
+                        new Font(
+                            "Segoe UI",
+                            9f,
+                            FontStyle.Regular),
+                    ForeColor =
+                        Color.FromArgb(80, 80, 80)
+                };
+
+            notification.Controls.Add(messageLabel);
+
+            // Placement au-dessus de la zone de notification / barre des tâches.
+            int margin = 12;
+
+            int x =
+                workingArea.Right -
+                notification.Width -
+                margin;
+
+            int y =
+                workingArea.Bottom -
+                notification.Height -
+                12;
+
+            notification.Location =
+                new Point(x, y);
+
+            notification.Show();
+            notification.BringToFront();
+            notification.Activate();
+
+            System.Windows.Forms.Timer closeTimer =
+                new System.Windows.Forms.Timer
+                {
+                    Interval = 3500
+                };
+
+            closeTimer.Tick +=
+                (_, _) =>
+                {
+                    closeTimer.Stop();
+                    closeTimer.Dispose();
+
+                    if (!notification.IsDisposed)
+                        notification.Close();
+                };
+
+            closeTimer.Start();
+        }
+        catch
+        {
+            // La notification ne doit jamais empêcher
+            // l'application de fonctionner.
+        }
+    }
+
+    private static GraphicsPath CreateRoundedNotificationPath(
+        Rectangle bounds,
+        int radius)
+    {
+        int diameter =
+            radius * 2;
+
+        GraphicsPath path =
+            new GraphicsPath();
+
+        path.AddArc(
+            bounds.X,
+            bounds.Y,
+            diameter,
+            diameter,
+            180,
+            90);
+
+        path.AddArc(
+            bounds.Right - diameter,
+            bounds.Y,
+            diameter,
+            diameter,
+            270,
+            90);
+
+        path.AddArc(
+            bounds.Right - diameter,
+            bounds.Bottom - diameter,
+            diameter,
+            diameter,
+            0,
+            90);
+
+        path.AddArc(
+            bounds.X,
+            bounds.Bottom - diameter,
+            diameter,
+            diameter,
+            90,
+            90);
+
+        path.CloseFigure();
+
+        return path;
+    }
+
+    private static void SetNotificationShadow(
+        Form notification)
+    {
+        try
+        {
+            notification.GetType()
+                .GetProperty("FormBorderStyle");
+
+            notification.ShowInTaskbar = false;
+        }
+        catch
+        {
+            // L'ombre est purement visuelle et non indispensable.
+        }
     }
 
     private static void UpdateTrayIcon()
@@ -2799,6 +3064,10 @@ class Program
             "Wallpaper Icon Hider";
 
         trayIcon.Visible = true;
+
+        // Indiquer clairement à l'utilisateur que l'application
+        // fonctionne désormais en arrière-plan.
+        ShowStartupNotification();
 
         // ---------------------------------------------------------------
         // MENU CONTEXTUEL PERSONNALISÉ
