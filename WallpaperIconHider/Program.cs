@@ -642,7 +642,7 @@ class Program
         public InstallationForm()
         {
             Text =
-                "Installation de Wallpaper Icon Hider";
+                "安装 Wallpaper Icon Hider";
 
             StartPosition =
                 FormStartPosition.CenterScreen;
@@ -655,11 +655,11 @@ class Program
             ShowInTaskbar = true;
 
             ClientSize =
-                new Size(520, 250);
+                new Size(520, 270);
 
             Font =
                 new Font(
-                    "Segoe UI",
+                    "Microsoft YaHei UI",
                     9.5f,
                     FontStyle.Regular,
                     GraphicsUnit.Point);
@@ -669,13 +669,13 @@ class Program
                 {
                     AutoSize = false,
                     Location = new Point(28, 22),
-                    Size = new Size(460, 32),
+                    Size = new Size(460, 40),
                     Text =
-                        "Bienvenue dans Wallpaper Icon Hider",
+                        "欢迎使用 Wallpaper Icon Hider",
                     Font =
                         new Font(
-                            "Segoe UI Semibold",
-                            15f,
+                            "Microsoft YaHei UI",
+                            14f,
                             FontStyle.Bold),
                     ForeColor =
                         Color.FromArgb(32, 32, 32)
@@ -690,7 +690,7 @@ class Program
                     Location = new Point(30, 66),
                     Size = new Size(455, 44),
                     Text =
-                        "Choisissez le dossier dans lequel Wallpaper Icon Hider sera installé.",
+                        "请选择 Wallpaper Icon Hider 的安装文件夹。",
                     ForeColor =
                         Color.FromArgb(80, 80, 80)
                 };
@@ -715,9 +715,9 @@ class Program
             Button browseButton =
                 new Button
                 {
-                    Text = "Parcourir...",
+                    Text = "浏览…",
                     Location = new Point(390, 120),
-                    Size = new Size(100, 30)
+                    Size = new Size(100, 36)
                 };
 
             browseButton.Click +=
@@ -727,7 +727,7 @@ class Program
                         new FolderBrowserDialog
                         {
                             Description =
-                                "Choisissez le dossier d'installation.",
+                                "请选择安装文件夹。",
                             UseDescriptionForTitle = true,
                             SelectedPath =
                                 Directory.Exists(
@@ -752,10 +752,10 @@ class Program
                 {
                     AutoSize = false,
                     Location = new Point(30, 160),
-                    Size = new Size(460, 40),
+                    Size = new Size(460, 52),
                     Text =
-                        "Wallpaper Engine doit être installé via Steam. " +
-                        "L'installation de Wallpaper Icon Hider ne modifie pas Wallpaper Engine.",
+                        "需要通过 Steam 安装 Wallpaper Engine。\n" +
+                        "本程序不会修改 Wallpaper Engine。",
                     ForeColor =
                         Color.FromArgb(95, 95, 95)
                 };
@@ -765,11 +765,11 @@ class Program
             Button cancelButton =
                 new Button
                 {
-                    Text = "Annuler",
+                    Text = "取消",
                     DialogResult =
                         DialogResult.Cancel,
-                    Location = new Point(300, 205),
-                    Size = new Size(90, 30)
+                    Location = new Point(300, 222),
+                    Size = new Size(90, 36)
                 };
 
             Controls.Add(cancelButton);
@@ -777,11 +777,11 @@ class Program
             Button installButton =
                 new Button
                 {
-                    Text = "Installer",
+                    Text = "安装",
                     DialogResult =
                         DialogResult.OK,
-                    Location = new Point(400, 205),
-                    Size = new Size(90, 30)
+                    Location = new Point(400, 222),
+                    Size = new Size(90, 36)
                 };
 
             installButton.Click +=
@@ -792,8 +792,8 @@ class Program
                     {
                         MessageBox.Show(
                             this,
-                            "Veuillez choisir un dossier d'installation.",
-                            "Installation",
+                            "请选择安装文件夹。",
+                            "安装",
                             MessageBoxButtons.OK,
                             MessageBoxIcon.Warning);
 
@@ -823,7 +823,7 @@ class Program
         public InstallationCompleteForm()
         {
             Text =
-                "Installation terminée";
+                "安装完成";
 
             StartPosition =
                 FormStartPosition.CenterScreen;
@@ -836,11 +836,11 @@ class Program
             ShowInTaskbar = true;
 
             ClientSize =
-                new Size(520, 260);
+                new Size(520, 280);
 
             Font =
                 new Font(
-                    "Segoe UI",
+                    "Microsoft YaHei UI",
                     9.5f,
                     FontStyle.Regular,
                     GraphicsUnit.Point);
@@ -850,13 +850,13 @@ class Program
                 {
                     AutoSize = false,
                     Location = new Point(28, 22),
-                    Size = new Size(460, 32),
+                    Size = new Size(460, 40),
                     Text =
-                        "Installation terminée",
+                        "安装完成",
                     Font =
                         new Font(
-                            "Segoe UI Semibold",
-                            15f,
+                            "Microsoft YaHei UI",
+                            14f,
                             FontStyle.Bold),
                     ForeColor =
                         Color.FromArgb(32, 32, 32)
@@ -871,7 +871,7 @@ class Program
                     Location = new Point(30, 66),
                     Size = new Size(455, 45),
                     Text =
-                        "Wallpaper Icon Hider a été installé avec succès.",
+                        "Wallpaper Icon Hider 已安装成功。",
                     ForeColor =
                         Color.FromArgb(80, 80, 80)
                 };
@@ -884,7 +884,7 @@ class Program
                     AutoSize = true,
                     Location = new Point(30, 120),
                     Text =
-                        "Créer un raccourci sur le bureau",
+                        "创建桌面快捷方式",
                     Checked = true
                 };
 
@@ -896,7 +896,7 @@ class Program
                     AutoSize = true,
                     Location = new Point(30, 150),
                     Text =
-                        "Lancer Wallpaper Icon Hider maintenant",
+                        "立即启动 Wallpaper Icon Hider",
                     Checked = true
                 };
 
@@ -909,7 +909,7 @@ class Program
                     Location = new Point(30, 180),
                     Size = new Size(460, 38),
                     Text =
-                        "Vous pourrez toujours modifier ces choix plus tard.",
+                        "这些选项之后仍可更改。",
                     ForeColor =
                         Color.FromArgb(95, 95, 95)
                 };
@@ -919,11 +919,11 @@ class Program
             Button finishButton =
                 new Button
                 {
-                    Text = "Terminer",
+                    Text = "完成",
                     DialogResult =
                         DialogResult.OK,
-                    Location = new Point(390, 220),
-                    Size = new Size(100, 30)
+                    Location = new Point(390, 232),
+                    Size = new Size(100, 36)
                 };
 
             Controls.Add(finishButton);
@@ -963,7 +963,7 @@ class Program
                 catch (Exception ex)
                 {
                     MessageBox.Show(
-                        "Impossible de lancer la version installée.\n\n" +
+                        "无法启动已安装的程序。\n\n" +
                         ex.Message,
                         "Wallpaper Icon Hider",
                         MessageBoxButtons.OK,
@@ -1010,8 +1010,8 @@ class Program
                     installedExecutable))
             {
                 MessageBox.Show(
-                    "L'application a été copiée, mais ses informations " +
-                    "d'installation n'ont pas pu être enregistrées.",
+                    "程序已复制，但无法保存" +
+                    "安装信息。",
                     "Wallpaper Icon Hider",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
@@ -1040,8 +1040,8 @@ class Program
                 else
                 {
                     MessageBox.Show(
-                        "L'installation est terminée, mais le raccourci " +
-                        "sur le bureau n'a pas pu être créé.",
+                        "安装已完成，但无法创建" +
+                        "桌面快捷方式。",
                         "Wallpaper Icon Hider",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Warning);
@@ -1074,8 +1074,8 @@ class Program
                 catch (Exception ex)
                 {
                     MessageBox.Show(
-                        "L'installation est terminée, mais l'application " +
-                        "n'a pas pu être lancée.\n\n" +
+                        "安装已完成，但无法" +
+                        "启动程序。\n\n" +
                         ex.Message,
                         "Wallpaper Icon Hider",
                         MessageBoxButtons.OK,
@@ -1097,7 +1097,7 @@ class Program
         catch (Exception ex)
         {
             MessageBox.Show(
-                "L'installation a échoué.\n\n" +
+                "安装失败。\n\n" +
                 ex.Message,
                 "Wallpaper Icon Hider",
                 MessageBoxButtons.OK,
@@ -1277,7 +1277,7 @@ class Program
                     executablePath);
 
             shortcut.Description =
-                "Lance Wallpaper Icon Hider au démarrage de Windows.";
+                "随 Windows 启动 Wallpaper Icon Hider。";
 
             shortcut.IconLocation =
                 executablePath;
@@ -1336,7 +1336,7 @@ class Program
                     executablePath);
 
             shortcut.Description =
-                "Lance Wallpaper Icon Hider.";
+                "启动 Wallpaper Icon Hider。";
 
             shortcut.IconLocation =
                 executablePath;
@@ -2196,7 +2196,7 @@ class Program
                         FormStartPosition.Manual,
 
                     ClientSize =
-                        new Size(320, 72),
+                        new Size(360, 90),
 
                     BackColor =
                         Color.FromArgb(249, 249, 250)
@@ -2228,12 +2228,12 @@ class Program
                 {
                     AutoSize = false,
                     Location = new Point(18, 10),
-                    Size = new Size(280, 22),
+                    Size = new Size(324, 30),
                     Text =
                         "Wallpaper Icon Hider",
                     Font =
                         new Font(
-                            "Segoe UI Semibold",
+                            "Microsoft YaHei UI",
                             10f,
                             FontStyle.Bold),
                     ForeColor =
@@ -2246,13 +2246,13 @@ class Program
                 new Label
                 {
                     AutoSize = false,
-                    Location = new Point(18, 34),
-                    Size = new Size(280, 28),
+                    Location = new Point(18, 44),
+                    Size = new Size(324, 30),
                     Text =
-                        "L'application est maintenant active en arrière-plan.",
+                        "程序已启动，正在后台运行。",
                     Font =
                         new Font(
-                            "Segoe UI",
+                            "Microsoft YaHei UI",
                             9f,
                             FontStyle.Regular),
                     ForeColor =
@@ -2654,7 +2654,7 @@ class Program
 
             BackColor = MenuBackground;
             Font = new Font(
-                "Segoe UI",
+                "Microsoft YaHei UI",
                 9.5f,
                 FontStyle.Regular,
                 GraphicsUnit.Point);
@@ -2826,7 +2826,7 @@ class Program
                             ContentAlignment.MiddleLeft,
                         Font =
                             new Font(
-                                "Segoe UI Semibold",
+                                "Microsoft YaHei UI",
                                 10f,
                                 FontStyle.Bold),
                         ForeColor = PrimaryText
@@ -2942,7 +2942,7 @@ class Program
 
             form.AddRow(
                 "",
-                "Activer",
+                "启用",
                 HeaderHeight,
                 enableAction,
                 enabled,
@@ -2951,7 +2951,7 @@ class Program
 
             form.AddRow(
                 "",
-                "Désactiver",
+                "停用",
                 HeaderHeight + RowHeight,
                 disableAction,
                 !enabled,
@@ -2966,7 +2966,7 @@ class Program
 
             form.AddRow(
                 "⚙",
-                "Paramètres",
+                "设置",
                 separator1 + 2,
                 settingsAction,
                 false,
@@ -2979,7 +2979,7 @@ class Program
 
             form.AddRow(
                 "×",
-                "Quitter",
+                "退出",
                 separator2 + 2,
                 exitAction);
 
@@ -3003,14 +3003,14 @@ class Program
                     12);
 
             form.AddHeader(
-                "Paramètres",
+                "设置",
                 backAction);
 
             int firstRowY = HeaderHeight;
 
             form.AddRow(
                 "⏱",
-                $"Délai de masquage : {delay} s",
+                $"隐藏延迟：{delay} 秒",
                 firstRowY,
                 delayAction,
                 false,
@@ -3018,7 +3018,7 @@ class Program
 
             form.AddRow(
                 "",
-                "Démarrer avec Windows",
+                "随 Windows 启动",
                 firstRowY + RowHeight,
                 startupAction,
                 startupEnabled,
@@ -3028,7 +3028,7 @@ class Program
 
             form.AddRow(
                 "",
-                "Masquer le curseur avec les icônes",
+                "隐藏图标时同时隐藏鼠标指针",
                 firstRowY + RowHeight * 2,
                 cursorAction,
                 hideCursorEnabled,
@@ -3053,7 +3053,7 @@ class Program
                 new ModernMenuForm(height);
 
             form.AddHeader(
-                "Délai de masquage",
+                "隐藏延迟",
                 backAction);
 
             for (int i = MinimumDelaySeconds;
@@ -3064,8 +3064,7 @@ class Program
 
                 form.AddRow(
                     " ",
-                    $"{value} seconde" +
-                    (value > 1 ? "s" : ""),
+                    $"{value} 秒",
                     HeaderHeight +
                     (value - 1) * RowHeight,
                     () => selectAction(value),
@@ -3199,7 +3198,7 @@ class Program
 
                 using Font textFont =
                     new Font(
-                        "Segoe UI",
+                        "Microsoft YaHei UI",
                         9.5f,
                         FontStyle.Regular,
                         GraphicsUnit.Point);
