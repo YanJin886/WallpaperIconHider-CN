@@ -1,3 +1,4 @@
+**Language / 语言：** [English](README.en.md) | [简体中文](README.md)
 # Wallpaper Icon Hider
 
 A lightweight Windows utility that automatically hides desktop icons after a configurable period of mouse inactivity while Wallpaper Engine is being used.
